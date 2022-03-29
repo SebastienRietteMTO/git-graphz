@@ -19,7 +19,7 @@ class GitGraph():
     COLOR_BRANCH = "orange"
     COLOR_STASH = "red"
 
-    def __init__(self, showMessages=False):
+    def __init__(self):
         """
         """
         self.pattern = re.compile(r'^\[(\d+)\|\|(.*)\|\|(.*)\|\|\s?(.*)\]\s([0-9a-f]*)\s?([0-9a-f]*)\s?([0-9a-f]*)$')
@@ -32,33 +32,32 @@ class GitGraph():
         """
         if revRange is not None:
             logging.info("Range: " + revRange)
+            revRange = [revRange]
         else:
-            revRange = ""
-        
-        gitLogCommand = 'git log --pretty=format:"[%ct||%cn||%s||%d] %h %p" --all ' + revRange
-        logging.info('Git log command: ' + gitLogCommand)
-        output = subprocess.Popen(gitLogCommand, shell=True, stdout=subprocess.PIPE, universal_newlines=True)
-        (out, err) = output.communicate()
-        return out.split("\n")
+            revRange = []
+        gitLogCommand = ['git', 'log', '--pretty=format:[%ct||%cn||%s||%d] %h %p', '--all'] + revRange
+        logging.info('Git log command: ' + ' '.join(gitLogCommand))
+        out = subprocess.run(gitLogCommand, capture_output=True, universal_newlines=True, check=True).stdout.split('\n')
+        return out
 
     @staticmethod
     def getCommitDiff(hash):
+        command = ['git', 'diff', hash + '^', hash]
+        logging.debug("Hash Command: " + ' '.join(command))
+        diff = subprocess.run(command, capture_output=True, check=True).stdout
         # get only the changed lines (starting with + or -), no line numbers, hashes, ...
-        command = 'git diff ' + hash + '^ ' + hash + ' | grep "^[-+]"'
-        logging.debug("Hash Command: " + command)
-        diffOutput = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, universal_newlines=True)
-        (diff, err) = diffOutput.communicate()
+        diff = b'\n'.join([l for l in diff.splitlines() if (l.startswith(b'+') or l.startswith(b'-'))])
         return diff
     
     def getCommitDiffHash(self, hash):
         diff = self.getCommitDiff(hash)
-        sha = hashlib.sha1(diff.encode('utf-8'))
+        sha = hashlib.sha1(diff)
         return sha.hexdigest()
 
     def getDot(self, showMessages=False, revRange=None):
         """
         :param showMessages (optional): Show commit messages in node
-        :param revRange: git commit range to deal with
+        :param revRange (optional): git commit range to deal with
         """
         lines = self.getLog(revRange)
         
@@ -100,7 +99,7 @@ class GitGraph():
                 link2 = ""
                 labelExt = ""
                 nodeMessage = ""
-                if args.messages:
+                if showMessages:
                     nodeMessage = "\n" + message.replace("\"", "'");
                 if commitHash in predefinedNodeColor:
                     labelExt = "\\nSTASH INDEX"
@@ -179,6 +178,134 @@ class GitGraph():
         digraph += "}"
         return digraph
 
+    def getHtml(self, filename, revRange=None):
+        """
+        Write an html page
+        :param revRange: git commit range to deal with
+        :param filename: html file name
+        """
+
+        import xml.dom.minidom
+        import json
+        
+        svg = subprocess.run(['dot', '-Tsvg'], input=self.getDot(False, revRange).encode('utf8'),
+                             check=True, capture_output=True).stdout
+        bodies = {}
+        for node in xml.dom.minidom.parseString(svg).getElementsByTagName("g")[0].getElementsByTagName("g"):
+            commit = node.getElementsByTagName("title")[0].childNodes[0].data
+            if node.getAttribute("id").startswith('node'):
+                #check=False because some nodes are not commits
+                bodies[commit] = subprocess.run(['git', 'log', '-n1', commit],
+                                                capture_output=True, check=False).stdout.decode('utf-8')
+                bodies[commit] = bodies[commit].replace("'", "&#39;").replace('\n', '<br/>').replace('"', '&quot;')
+
+        #Html header
+        html = '<!DOCTYPE html>\n'
+        html += '<html>\n'
+        html += '<head>\n'
+        html += '<title>Git commit diagram</title>\n'
+        html += '<style>\n'
+        html += """
+.tooltip {
+    position: absolute;
+    white-space: nowrap;
+    display: none;
+    background: #ffffcc;
+    border: 1px solid black;
+    padding: 5px;
+    z-index: 1000;
+    color: black;
+}
+"""
+        html += '</style>\n'
+
+
+        html += '<script>\n'
+        html += """
+function moveTooltip(e) {
+  if(! tooltip_is_fixed) {
+    var tooltip = document.getElementById('tooltip');
+    tooltip.style.left =
+        (e.pageX + tooltip.clientWidth + 10 < document.body.clientWidth)
+            ? (e.pageX + 10 + "px")
+            : (document.body.clientWidth + 5 - tooltip.clientWidth + "px");
+    tooltip.style.top =
+        (e.pageY + tooltip.clientHeight + 10 < document.body.clientHeight)
+            ? (e.pageY + 10 + "px")
+            : (document.body.clientHeight + 5 - tooltip.clientHeight + "px");
+  }
+}
+var mouse_is_over=false;
+var tooltip_is_fixed=false;
+function overToolTip(e) {
+  if(! tooltip_is_fixed) {
+    var tooltip = document.getElementById('tooltip');
+    tooltip.innerHTML = e.currentTarget.details;
+    mouse_is_over=true;
+    setTooltipVisibility();
+  }
+}
+function outToolTip(e) {
+  var tooltip = document.getElementById('tooltip');
+  mouse_is_over=false;
+  setTooltipVisibility();
+}
+function setTooltipVisibility() {
+  if(mouse_is_over || tooltip_is_fixed) {
+    tooltip.style.display = 'block';
+  } else {
+    tooltip.style.display = '';
+  }
+}
+function clickTooltip(e) {
+  tooltip_is_fixed=false;
+  setTooltipVisibility();
+}
+function clickParentTooltip(e) {
+  tooltip_is_fixed=false;
+  moveTooltip(e);
+  overToolTip(e);
+  tooltip_is_fixed=true;
+  setTooltipVisibility();
+}
+
+function addListeners() {
+  var tooltips = document.querySelectorAll('.node');
+  for(var i = 0; i < tooltips.length; i++) {
+    tooltips[i].addEventListener('mousemove', moveTooltip);
+    tooltips[i].addEventListener("mouseover", overToolTip);
+    tooltips[i].addEventListener("mouseout", outToolTip);
+    tooltips[i].addEventListener("click", clickParentTooltip);
+    tooltips[i].details=logs[tooltips[i].getElementsByTagName("title")[0].innerHTML]
+  }
+
+  var tooltip = document.getElementById('tooltip');
+  tooltip.addEventListener('click', clickTooltip);
+}
+
+const logs = JSON.parse(`""" + json.dumps(bodies, indent=0) + """`);
+"""
+        html += '</script>\n'
+
+
+        html += '</head>\n'
+        html += "<body onload='addListeners()'>\n"
+
+        #Tooltip
+        html += '<span id="tooltip" class="tooltip">This is a tooltip<br/>zizi</span>'
+
+        #SVG inclusion (with suppression of xml and doctype informations)
+        svg = subprocess.run(['dot', '-Tsvg'], input=self.getDot(False, revRange).encode('utf8'),
+                             check=True, capture_output=True).stdout
+        svg = svg[svg.index(b'<svg'):]
+        html += '<div>\n' + svg.decode('utf-8') + '\n</div>\n'
+
+        #Html footer
+        html += "</body>\n</html>"
+
+        with open(filename, 'w') as f:
+          f.write(html)
+
     def getImage(self, filename, showMessages=False, revRange=None):
         """
         Write an image
@@ -191,9 +318,12 @@ class GitGraph():
                          See: https://www.graphviz.org/docs/outputs/
         """
         fmt = os.path.splitext(filename)[1][1:]
-        dotCommand = ['dot', '-T' + fmt, '-o', filename]
-        logging.info('Dot command: ' + ' '.join(dotCommand))
-        subprocess.run(dotCommand, input=self.getDot(showMessages, revRange).encode('utf8'), check=True)
+        if fmt == 'html':
+            self.getHtml(filename, revRange)
+        else:
+            dotCommand = ['dot', '-T' + fmt, '-o', filename]
+            logging.info('Dot command: ' + ' '.join(dotCommand))
+            subprocess.run(dotCommand, input=self.getDot(showMessages, revRange).encode('utf8'), check=True)
 
 if __name__ == '__main__':
     import argparse
@@ -206,7 +336,7 @@ if __name__ == '__main__':
     parser.add_argument("-o", "--output", dest='output', default=None,
                         help="Image filename to produce, if not provided the DOT file will be outputed on STDOUT." + \
                              "The extension is used to determine the image format, it must be one of the accepted agrument accepted on the" + \
-                             "command line of the dot utility (See: https://www.graphviz.org/docs/outputs/)")
+                             "command line of the dot utility (See: https://www.graphviz.org/docs/outputs/) + html")
     
     args = parser.parse_args()
     if args.verbose > 0:

@@ -20,7 +20,10 @@ On linux you can use the following command to create a graph.ps file
 Or you can simply (the file extension must be an accepted command line option of the dot utility (see [here](https://www.graphviz.org/docs/outputs/))
 
     ./git-graph -o image.pdf
-    
+
+In addition to the graphviz accepted extensions, it is also possible to generate an html page
+
+    ./git-graph -o image.html
 
 Example with range
 
