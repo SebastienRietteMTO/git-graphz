@@ -203,6 +203,8 @@ class GitGraph():
         html = '<!DOCTYPE html>\n'
         html += '<html>\n'
         html += '<head>\n'
+#        html += '<meta charset="UTF-8">\n'
+        html += '<meta http-equiv="content-type" content="text/html; charset=utf-8" />\n'
         html += '<title>Git commit diagram</title>\n'
         html += '<style>\n'
         html += """
@@ -224,15 +226,10 @@ class GitGraph():
         html += """
 function moveTooltip(e) {
   if(! tooltip_is_fixed) {
-    var tooltip = document.getElementById('tooltip');
-    tooltip.style.left =
-        (e.pageX + tooltip.clientWidth + 10 < document.body.clientWidth)
-            ? (e.pageX + 10 + "px")
-            : (document.body.clientWidth + 5 - tooltip.clientWidth + "px");
-    tooltip.style.top =
-        (e.pageY + tooltip.clientHeight + 10 < document.body.clientHeight)
-            ? (e.pageY + 10 + "px")
-            : (document.body.clientHeight + 5 - tooltip.clientHeight + "px");
+    var x = (e.pageX + 20) + 'px',
+        y = (e.pageY + 20) + 'px';
+    tooltip.style.top = y;
+    tooltip.style.left = x;
   }
 }
 var mouse_is_over=false;
