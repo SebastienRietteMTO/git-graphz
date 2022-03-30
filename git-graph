@@ -42,16 +42,21 @@ class GitGraph():
         self.pattern = re.compile(r'^\[(\d+)\|\|(.*)\|\|(.*)\|\|\s?(.*)\]\s([0-9a-f]*)\s?([0-9a-f]*)\s?([0-9a-f]*)$')
         self.revertMessagePattern = re.compile(r'Revert "(.*)"')
 
-    def getLog(self, revRange=None):
+    def getLog(self, revRange=None, options=None):
         """
         :param revRange: git commit range to deal with
+        :param options: - dictionary containing other options to use for log command
+                        - or None, in this case '--all' option is used
+                        use an empty dictionary ([]) to suppress all options
         """
         if revRange is not None:
             logging.info("Range: " + revRange)
             revRange = [revRange]
         else:
             revRange = []
-        gitLogCommand = ['git', 'log', '--pretty=format:[%ct||%cn||%s||%d] %h %p', '--all'] + revRange
+        if options is None:
+            options = ['--all']
+        gitLogCommand = ['git', 'log', '--pretty=format:[%ct||%cn||%s||%d] %h %p'] + options + revRange
         logging.info('Git log command: ' + ' '.join(gitLogCommand))
         out = subprocess.run(gitLogCommand, cwd=self.repository, capture_output=True,
                              universal_newlines=True, check=True).stdout.split('\n')
@@ -70,12 +75,15 @@ class GitGraph():
         sha = hashlib.sha1(diff)
         return sha.hexdigest()
 
-    def getDot(self, showMessages=False, revRange=None):
+    def getDot(self, showMessages=False, revRange=None, logOptions=None):
         """
         :param showMessages (optional): Show commit messages in node
         :param revRange (optional): git commit range to deal with
+        :param logOptions: - dictionary containing other options to use for log command
+                           - or None, in this case '-all' option is used
+                           use an empty dictionary ([]) to suppress all options
         """
-        lines = self.getLog(revRange)
+        lines = self.getLog(revRange, logOptions)
         
         dates = {}
         messages = {}
@@ -194,17 +202,20 @@ class GitGraph():
         digraph += "}"
         return digraph
 
-    def getHtml(self, filename, revRange=None):
+    def getHtml(self, filename, revRange=None, logOptions=None):
         """
         Write an html page
         :param revRange: git commit range to deal with
         :param filename: html file name
+        :param logOptions: - dictionary containing other options to use for log command
+                           - or None, in this case '-all' option is used
+                           use an empty dictionary ([]) to suppress all options
         """
 
         import xml.dom.minidom
         import json
         
-        svg = subprocess.run(['dot', '-Tsvg'], input=self.getDot(False, revRange).encode('utf8'),
+        svg = subprocess.run(['dot', '-Tsvg'], input=self.getDot(False, revRange, logOptions).encode('utf8'),
                              check=True, capture_output=True).stdout
         bodies = {}
         for node in xml.dom.minidom.parseString(svg).getElementsByTagName("g")[0].getElementsByTagName("g"):
@@ -317,7 +328,7 @@ const logs = JSON.parse(`""" + json.dumps(bodies, indent=0) + """`);
         with open(filename, 'w') as f:
           f.write(html)
 
-    def getImage(self, filename, showMessages=False, revRange=None):
+    def getImage(self, filename, showMessages=False, revRange=None, logOptions=None):
         """
         Write an image
         :param showMessages (optional): Show commit messages in node
@@ -327,6 +338,9 @@ const logs = JSON.parse(`""" + json.dumps(bodies, indent=0) + """`);
                          it must be one of the accepted agrument accepted on the
                          command line of the dot utility
                          See: https://www.graphviz.org/docs/outputs/
+        :param logOptions: - dictionary containing other options to use for log command
+                           - or None, in this case '-all' option is used
+                           use an empty dictionary ([]) to suppress all options
         """
         fmt = os.path.splitext(filename)[1][1:]
         if fmt == 'html':
@@ -334,7 +348,7 @@ const logs = JSON.parse(`""" + json.dumps(bodies, indent=0) + """`);
         else:
             dotCommand = ['dot', '-T' + fmt, '-o', filename]
             logging.info('Dot command: ' + ' '.join(dotCommand))
-            subprocess.run(dotCommand, input=self.getDot(showMessages, revRange).encode('utf8'), check=True)
+            subprocess.run(dotCommand, input=self.getDot(showMessages, revRange, logOptions).encode('utf8'), check=True)
 
 if __name__ == '__main__':
     import argparse
@@ -347,8 +361,11 @@ if __name__ == '__main__':
     parser.add_argument("-p", "--path", dest="path", default=None, help="git repository to use")
     parser.add_argument("-o", "--output", dest='output', default=None,
                         help="Image filename to produce, if not provided the DOT file will be outputed on STDOUT." + \
-                             "The extension is used to determine the image format, it must be one of the accepted agrument accepted on the" + \
+                             "The extension is used to determine the image format, it must be one of the accepted agrument accepted on the " + \
                              "command line of the dot utility (See: https://www.graphviz.org/docs/outputs/) + html")
+    parser.add_argument('--option', dest='logOptions', default=None, action='append',
+                        help="Options to add to the 'git log' command used to find all the relevant commits. If no option is provided " + \
+                             "the '--all' option is used. Ex: --option=--remotes=upstream")
     
     args = parser.parse_args()
     if args.verbose > 0:
@@ -357,7 +374,7 @@ if __name__ == '__main__':
 
     gg = GitGraph(args.path)
     if args.output is None:
-        print(gg.getDot(showMessages=args.messages, revRange=args.range))
+        print(gg.getDot(showMessages=args.messages, revRange=args.range, logOptions=args.logOptions))
     else:
-        gg.getImage(args.output, showMessages=args.messages, revRange=args.range)
+        gg.getImage(args.output, showMessages=args.messages, revRange=args.range, logOptions=args.logOptions)
 

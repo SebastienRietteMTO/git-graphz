@@ -29,10 +29,16 @@ Example with range
 
     ./git-graph -r a51eced..HEAD | dot -Tps -o graph.ps
 
+Example with upstream commits
+
+    ./git-graph --option=--remotes=upstream
+
 ### Parameters
 * **-v**: to print info (or debug if provided twice) output to stderr
 * **-m**: show commit messages in nodes
 * **-r range**: to get a specific range of the repository. See [here](http://git-scm.com/book/en/Git-Tools-Revision-Selection#Commit-Ranges)
+* **-p path**: to specify the directory containig the git repository (current working directory if omitted)
+* **--option=OPTION**: to add an option to the git log command used to list the relevant commits. If no option is provided the '--all' option is used. Ex: --option=--remotes=upstream
 
 # Example Graph
 ![alt text](images/example.gif)
