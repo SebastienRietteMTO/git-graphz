@@ -1,5 +1,7 @@
 #!/usr/bin/python3
+
 __author__ = 'Stephan Bechter <stephan@apogeum.at>'
+
 import subprocess
 import re
 import hashlib
@@ -19,14 +21,28 @@ class GitGraph():
     COLOR_BRANCH = "orange"
     COLOR_STASH = "red"
 
-    def __init__(self):
+    def __init__(self, repository=None):
         """
+        Tool to create a graph from a git history showing tags, branches, stash nodes, cherry-picks.
+        :param repository: directory containing the repository to use
         """
+        assert repository is None or os.path.isdir(repository), \
+           "Repository {repository} must be None or an existing directory".format(repository=repository)
+        self.repository = repository
+        command = ['git', 'rev-parse']
+        logging.info('Git command: ' + ' '.join(command))
+        status = subprocess.run(command, cwd=self.repository).returncode
+        if status != 0:
+            if repository is None:
+                message = "It seems that current working directory is not inside a git repository!"
+            else:
+                message = "It seems that this directory ({repository}) is not a git repository!".format(repository=repository)
+            raise RuntimeError(message)
+
         self.pattern = re.compile(r'^\[(\d+)\|\|(.*)\|\|(.*)\|\|\s?(.*)\]\s([0-9a-f]*)\s?([0-9a-f]*)\s?([0-9a-f]*)$')
         self.revertMessagePattern = re.compile(r'Revert "(.*)"')
 
-    @staticmethod
-    def getLog(revRange=None):
+    def getLog(self, revRange=None):
         """
         :param revRange: git commit range to deal with
         """
@@ -37,14 +53,14 @@ class GitGraph():
             revRange = []
         gitLogCommand = ['git', 'log', '--pretty=format:[%ct||%cn||%s||%d] %h %p', '--all'] + revRange
         logging.info('Git log command: ' + ' '.join(gitLogCommand))
-        out = subprocess.run(gitLogCommand, capture_output=True, universal_newlines=True, check=True).stdout.split('\n')
+        out = subprocess.run(gitLogCommand, cwd=self.repository, capture_output=True,
+                             universal_newlines=True, check=True).stdout.split('\n')
         return out
 
-    @staticmethod
-    def getCommitDiff(hash):
+    def getCommitDiff(self, hash):
         command = ['git', 'diff', hash + '^', hash]
         logging.debug("Hash Command: " + ' '.join(command))
-        diff = subprocess.run(command, capture_output=True, check=True).stdout
+        diff = subprocess.run(command, cwd=self.repository, capture_output=True, check=True).stdout
         # get only the changed lines (starting with + or -), no line numbers, hashes, ...
         diff = b'\n'.join([l for l in diff.splitlines() if (l.startswith(b'+') or l.startswith(b'-'))])
         return diff
@@ -195,7 +211,7 @@ class GitGraph():
             commit = node.getElementsByTagName("title")[0].childNodes[0].data
             if node.getAttribute("id").startswith('node'):
                 #check=False because some nodes are not commits
-                bodies[commit] = subprocess.run(['git', 'log', '-n1', commit],
+                bodies[commit] = subprocess.run(['git', 'log', '-n1', commit], cwd=self.repository, 
                                                 capture_output=True, check=False).stdout.decode('utf-8')
                 bodies[commit] = bodies[commit].replace("'", "&#39;").replace('\n', '<br/>').replace('"', '&quot;')
 
@@ -292,8 +308,6 @@ const logs = JSON.parse(`""" + json.dumps(bodies, indent=0) + """`);
         html += '<span id="tooltip" class="tooltip">This is a tooltip<br/>zizi</span>'
 
         #SVG inclusion (with suppression of xml and doctype informations)
-        svg = subprocess.run(['dot', '-Tsvg'], input=self.getDot(False, revRange).encode('utf8'),
-                             check=True, capture_output=True).stdout
         svg = svg[svg.index(b'<svg'):]
         html += '<div>\n' + svg.decode('utf-8') + '\n</div>\n'
 
@@ -330,6 +344,7 @@ if __name__ == '__main__':
                         help="Show info messages on stderr or debug messages if -v option is set twice")
     parser.add_argument("-m", "--messages", dest="messages", action="store_true", help="Show commit messages in node" )
     parser.add_argument("-r", "--range", dest="range", default=None, help="git commit range" )
+    parser.add_argument("-p", "--path", dest="path", default=None, help="git repository to use")
     parser.add_argument("-o", "--output", dest='output', default=None,
                         help="Image filename to produce, if not provided the DOT file will be outputed on STDOUT." + \
                              "The extension is used to determine the image format, it must be one of the accepted agrument accepted on the" + \
@@ -340,8 +355,9 @@ if __name__ == '__main__':
         level = 'INFO' if args.verbose == 1 else 'DEBUG'
         logging.basicConfig(level=getattr(logging, level, None))
 
+    gg = GitGraph(args.path)
     if args.output is None:
-        print(GitGraph().getDot(showMessages=args.messages, revRange=args.range))
+        print(gg.getDot(showMessages=args.messages, revRange=args.range))
     else:
-        GitGraph().getImage(args.output, showMessages=args.messages, revRange=args.range)
+        gg.getImage(args.output, showMessages=args.messages, revRange=args.range)
 
