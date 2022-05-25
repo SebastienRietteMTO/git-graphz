@@ -8,6 +8,7 @@ import hashlib
 import sys
 import logging
 import os
+import tempfile
 
 class GitGraph():
     # colors
@@ -25,10 +26,19 @@ class GitGraph():
         """
         Tool to create a graph from a git history showing tags, branches, stash nodes, cherry-picks.
         :param repository: directory containing the repository to use
+                           None to use the current working directory
+                           otherwise, must be a string used as a git url
         """
-        assert repository is None or os.path.isdir(repository), \
-           "Repository {repository} must be None or an existing directory".format(repository=repository)
-        self.repository = repository
+        if repository is None or os.path.isdir(repository):
+            self.repository = repository
+        else:
+            self._tmpdir = tempfile.TemporaryDirectory() #will be deleted when self._tmpdir will be garbage collected
+            self.repository = self._tmpdir.name
+            command = ['git', 'clone', repository, '.']
+            logging.info('Git command: ' + ' '.join(command))
+            status = subprocess.run(command, cwd=self.repository).returncode
+            if status != 0:
+                raise RuntimeError("Error during repository cloning using the url: " + str(url))
         command = ['git', 'rev-parse']
         logging.info('Git command: ' + ' '.join(command))
         status = subprocess.run(command, cwd=self.repository).returncode
@@ -358,7 +368,7 @@ if __name__ == '__main__':
                         help="Show info messages on stderr or debug messages if -v option is set twice")
     parser.add_argument("-m", "--messages", dest="messages", action="store_true", help="Show commit messages in node" )
     parser.add_argument("-r", "--range", dest="range", default=None, help="git commit range" )
-    parser.add_argument("-p", "--path", dest="path", default=None, help="git repository to use")
+    parser.add_argument("-p", "--path", dest="path", default=None, help="git repository to use (local directory or url)")
     parser.add_argument("-o", "--output", dest='output', default=None,
                         help="Image filename to produce, if not provided the DOT file will be outputed on STDOUT." + \
                              "The extension is used to determine the image format, it must be one of the accepted agrument accepted on the " + \
