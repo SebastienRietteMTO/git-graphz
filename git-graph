@@ -38,7 +38,7 @@ class GitGraph():
             logging.info('Git command: ' + ' '.join(command))
             status = subprocess.run(command, cwd=self.repository).returncode
             if status != 0:
-                raise RuntimeError("Error during repository cloning using the url: " + str(url))
+                raise RuntimeError("Error during repository cloning using the url: " + str(repository))
         command = ['git', 'rev-parse']
         logging.info('Git command: ' + ' '.join(command))
         status = subprocess.run(command, cwd=self.repository).returncode
@@ -383,8 +383,13 @@ if __name__ == '__main__':
         logging.basicConfig(level=getattr(logging, level, None))
 
     gg = GitGraph(args.path)
-    if args.output is None:
-        print(gg.getDot(showMessages=args.messages, revRange=args.range, logOptions=args.logOptions))
+    if args.output is None or os.path.splitext(args.output)[1][1:] == 'dot':
+        dotContent = gg.getDot(showMessages=args.messages, revRange=args.range, logOptions=args.logOptions)
+        if args.output is None:
+            print(dotContent)
+        else:
+            with open(args.output, 'w') as f:
+                f.write(dotContent)
     else:
         gg.getImage(args.output, showMessages=args.messages, revRange=args.range, logOptions=args.logOptions)
 
