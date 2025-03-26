@@ -175,7 +175,7 @@ class GitGraph():
                         logging.debug("Revert match [" + originalMessage + "]")
                         if originalMessage in messages:
                             origRevertHash = messages[originalMessage]
-                            digraph += '    "' + commitHash + '"->"' + str(origRevertHash) + '"[label="Revert",style=dotted,fontcolor="azure4",color="azure4"]'
+                            digraph += '    "' + commitHash + '"->"' + str(origRevertHash) + '"[label="Revert",style=dotted,fontcolor="azure4",color="azure4",constraint=false]'
                         else:
                             logging.warning('Not able to find the original revert commit for commit ' + commitHash)
                             digraph += '    "revert_' + commitHash + '"[label="", shape=none, height=.0, width=.0]; "' + commitHash + '"->"revert_' + commitHash + '"[label="Revert ??",style=dotted,fontcolor="azure4",color="azure4"];'
