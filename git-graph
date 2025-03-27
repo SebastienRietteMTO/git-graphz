@@ -254,6 +254,18 @@ class GitGraph():
     padding: 5px;
     z-index: 1000;
     color: black;
+    text-align: right;
+}
+.tooltipHeader {
+    color: red;
+    border-bottom: 1px solid grey;
+    margin-top: 0;
+    margin-bottom: 0;
+}
+.tooltipContent {
+    text-align: left;
+    margin-top: 5px;
+    margin-bottom: 0;
 }
 """
         html += '</style>\n'
@@ -273,8 +285,8 @@ var mouse_is_over=false;
 var tooltip_is_fixed=false;
 function overToolTip(e) {
   if(! tooltip_is_fixed) {
-    var tooltip = document.getElementById('tooltip');
-    tooltip.innerHTML = e.currentTarget.details;
+    var tooltipContent = document.getElementById('tooltipContent');
+    tooltipContent.innerHTML = e.currentTarget.details;
     mouse_is_over=true;
     setTooltipVisibility();
   }
@@ -313,8 +325,8 @@ function addListeners() {
     tooltips[i].details=logs[tooltips[i].getElementsByTagName("title")[0].innerHTML]
   }
 
-  var tooltip = document.getElementById('tooltip');
-  tooltip.addEventListener('click', clickTooltip);
+  var tooltipHeader = document.getElementById('tooltipHeader');
+  tooltipHeader.addEventListener('click', clickTooltip);
 }
 
 const logs = JSON.parse(`""" + json.dumps(bodies, indent=0) + """`);
@@ -326,7 +338,7 @@ const logs = JSON.parse(`""" + json.dumps(bodies, indent=0) + """`);
         html += "<body onload='addListeners()'>\n"
 
         #Tooltip
-        html += '<span id="tooltip" class="tooltip">This is a tooltip<br/>zizi</span>'
+        html += '<span id="tooltip" class="tooltip"><p id="tooltipHeader" class="tooltipHeader">⨂</p><p id="tooltipContent" class="tooltipContent">This is a tooltip<br/></p></span>'
 
         #SVG inclusion (with suppression of xml and doctype informations)
         svg = svg[svg.index(b'<svg'):]
