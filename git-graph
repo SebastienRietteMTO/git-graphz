@@ -22,16 +22,19 @@ class GitGraph():
     COLOR_BRANCH = "orange"
     COLOR_STASH = "red"
 
-    def __init__(self, repository=None):
+    def __init__(self, repository=None, url=None):
         """
         Tool to create a graph from a git history showing tags, branches, stash nodes, cherry-picks.
         :param repository: directory containing the repository to use
                            None to use the current working directory
                            otherwise, must be a string used as a git url
+        :param url: repository url to use for html output
         """
         if repository is None or os.path.isdir(repository):
+            self.url = url
             self.repository = repository
         else:
+            self.url = repository
             self._tmpdir = tempfile.TemporaryDirectory() #will be deleted when self._tmpdir will be garbage collected
             self.repository = self._tmpdir.name
             command = ['git', 'clone', repository, '.']
@@ -39,6 +42,8 @@ class GitGraph():
             status = subprocess.run(command, cwd=self.repository).returncode
             if status != 0:
                 raise RuntimeError("Error during repository cloning using the url: " + str(repository))
+        if self.url is not None and not self.url.startswith('https://'):
+            self.url = None
         command = ['git', 'rev-parse']
         logging.info('Git command: ' + ' '.join(command))
         status = subprocess.run(command, cwd=self.repository).returncode
@@ -235,6 +240,8 @@ class GitGraph():
                 bodies[commit] = subprocess.run(['git', 'log', '-n1', commit], cwd=self.repository, 
                                                 capture_output=True, check=False).stdout.decode('utf-8')
                 bodies[commit] = bodies[commit].replace("'", "&#39;").replace('\n', '<br/>').replace('"', '&quot;')
+                if self.url is not None:
+                    bodies[commit] = re.sub(r'\b(' + commit + r'[a-z,0-9]*)\b', f"<a href='{self.url}/commit/{commit}'>\\1</a>", bodies[commit])
 
         #Html header
         html = '<!DOCTYPE html>\n'
@@ -381,6 +388,7 @@ if __name__ == '__main__':
     parser.add_argument("-m", "--messages", dest="messages", action="store_true", help="Show commit messages in node" )
     parser.add_argument("-r", "--range", dest="range", default=None, help="git commit range" )
     parser.add_argument("-p", "--path", dest="path", default=None, help="git repository to use (local directory or url)")
+    parser.add_argument("-u", "--url", dest="url", default=None, help="repository url to use in html output")
     parser.add_argument("-o", "--output", dest='output', default=None,
                         help="Image filename to produce, if not provided the DOT file will be outputed on STDOUT." + \
                              "The extension is used to determine the image format, it must be one of the accepted agrument accepted on the " + \
@@ -394,7 +402,7 @@ if __name__ == '__main__':
         level = 'INFO' if args.verbose == 1 else 'DEBUG'
         logging.basicConfig(level=getattr(logging, level, None))
 
-    gg = GitGraph(args.path)
+    gg = GitGraph(args.path, args.url)
     if args.output is None or os.path.splitext(args.output)[1][1:] == 'dot':
         dotContent = gg.getDot(showMessages=args.messages, revRange=args.range, logOptions=args.logOptions)
         if args.output is None:
