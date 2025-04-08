@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 
 __author__ = 'Stephan Bechter <stephan@apogeum.at>'
+__version__ = '1.1.0'
 
 import subprocess
 import re
@@ -10,7 +11,7 @@ import logging
 import os
 import tempfile
 
-class GitGraph():
+class Gitgraphz():
     # colors
     COLOR_NODE = "cornsilk"
     COLOR_NODE_MERGE = "cornsilk2"
@@ -379,7 +380,7 @@ const logs = JSON.parse(`""" + json.dumps(bodies, indent=0) + """`);
             logging.info('Dot command: ' + ' '.join(dotCommand))
             subprocess.run(dotCommand, input=self.getDot(showMessages, revRange, logOptions).encode('utf8'), check=True)
 
-if __name__ == '__main__':
+def main():
     import argparse
     parser = argparse.ArgumentParser()
     
@@ -402,7 +403,7 @@ if __name__ == '__main__':
         level = 'INFO' if args.verbose == 1 else 'DEBUG'
         logging.basicConfig(level=getattr(logging, level, None))
 
-    gg = GitGraph(args.path, args.url)
+    gg = Gitgraphz(args.path, args.url)
     if args.output is None or os.path.splitext(args.output)[1][1:] == 'dot':
         dotContent = gg.getDot(showMessages=args.messages, revRange=args.range, logOptions=args.logOptions)
         if args.output is None:
@@ -412,4 +413,7 @@ if __name__ == '__main__':
                 f.write(dotContent)
     else:
         gg.getImage(args.output, showMessages=args.messages, revRange=args.range, logOptions=args.logOptions)
+
+if __name__ == '__main__':
+    main()
 

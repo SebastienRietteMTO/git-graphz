@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gitgraphz"
+dynamic = ["version"]
+dependencies = []
+authors = [
+  { name = "Stephan Bechter", email = "stephan@apogeum.at" },
+]
+description = "A git graph tool"
+readme = "README.md"
+requires-python = ">= 3.10"
+license = {text = "GPL-2.0-only"}
+classifiers = [
+    "License :: OSI Approved :: GNU General Public License v2 (GPLv2)",
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: POSIX :: Linux",
+]
+
+[project.scripts]
+'git-graphz' = "gitgraphz:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "gitgraphz.__version__"}
