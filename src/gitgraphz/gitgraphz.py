@@ -1,17 +1,28 @@
 #!/usr/bin/python3
 
+"""
+A python module and script to make a graph from a commit tree
+"""
+
 __author__ = 'Stephan Bechter <stephan@apogeum.at>'
 __version__ = '1.1.0'
 
 import subprocess
 import re
 import hashlib
-import sys
 import logging
 import os
 import tempfile
+import xml.dom.minidom
+import json
+import argparse
+
 
 class Gitgraphz():
+    """
+    Main class of gitgraphz
+    """
+
     # colors
     COLOR_NODE = "cornsilk"
     COLOR_NODE_MERGE = "cornsilk2"
@@ -36,215 +47,236 @@ class Gitgraphz():
             self.repository = repository
         else:
             self.url = repository
-            self._tmpdir = tempfile.TemporaryDirectory() #will be deleted when self._tmpdir will be garbage collected
+            # will be deleted when self._tmpdir will be garbage collected
+            self._tmpdir = tempfile.TemporaryDirectory()
             self.repository = self._tmpdir.name
             command = ['git', 'clone', repository, '.']
-            logging.info('Git command: ' + ' '.join(command))
-            status = subprocess.run(command, cwd=self.repository).returncode
+            logging.info('Git command: %s', ' '.join(command))
+            status = subprocess.run(command, cwd=self.repository, check=False).returncode
             if status != 0:
-                raise RuntimeError("Error during repository cloning using the url: " + str(repository))
+                raise RuntimeError(
+                    f"Error during repository cloning using the url: {str(repository)}")
         if self.url is not None and not self.url.startswith('https://'):
             self.url = None
         command = ['git', 'rev-parse']
-        logging.info('Git command: ' + ' '.join(command))
-        status = subprocess.run(command, cwd=self.repository).returncode
+        logging.info('Git command: %s', ' '.join(command))
+        status = subprocess.run(command, cwd=self.repository, check=False).returncode
         if status != 0:
             if repository is None:
                 message = "It seems that current working directory is not inside a git repository!"
             else:
-                message = "It seems that this directory ({repository}) is not a git repository!".format(repository=repository)
+                message = f"It seems that this directory ({repository}) is not a git repository!"
             raise RuntimeError(message)
 
-        self.pattern = re.compile(r'^\[(\d+)\|\|(.*)\|\|(.*)\|\|\s?(.*)\]\s([0-9a-f]*)\s?([0-9a-f]*)\s?([0-9a-f]*)$')
-        self.revertMessagePattern = re.compile(r'Revert "(.*)"')
+        self.pattern = re.compile(r'^\[(\d+)\|\|(.*)\|\|(.*)\|\|\s?(.*)\]' +
+                                  r'\s([0-9a-f]*)\s?([0-9a-f]*)\s?([0-9a-f]*)$')
+        self.reverse_message_pattern = re.compile(r'Revert "(.*)"')
 
-    def getLog(self, revRange=None, options=None):
+    def get_log(self, rev_range=None, options=None):
         """
-        :param revRange: git commit range to deal with
+        :param rev_range: git commit range to deal with
         :param options: - dictionary containing other options to use for log command
                         - or None, in this case '--all' option is used
                         use an empty dictionary ([]) to suppress all options
         """
-        if revRange is not None:
-            logging.info("Range: " + revRange)
-            revRange = [revRange]
+        if rev_range is not None:
+            logging.info("Range: %s", rev_range)
+            rev_range = [rev_range]
         else:
-            revRange = []
+            rev_range = []
         if options is None:
             options = ['--all']
-        gitLogCommand = ['git', 'log', '--pretty=format:[%ct||%cn||%s||%d] %h %p'] + options + revRange
-        logging.info('Git log command: ' + ' '.join(gitLogCommand))
-        out = subprocess.run(gitLogCommand, cwd=self.repository, capture_output=True,
+        git_log_command = ['git', 'log', '--pretty=format:[%ct||%cn||%s||%d] %h %p']
+        git_log_command += options + rev_range
+        logging.info('Git log command: %s', ' '.join(git_log_command))
+        out = subprocess.run(git_log_command, cwd=self.repository, capture_output=True,
                              universal_newlines=True, check=True).stdout.split('\n')
         return out
 
-    def getCommitDiff(self, hash):
-        command = ['git', 'diff', hash + '^', hash]
-        logging.debug("Hash Command: " + ' '.join(command))
+    def get_commit_diff(self, commit):
+        """
+        Get the differences introduced by a commit
+        :param commit: commit's hash
+        """
+        command = ['git', 'diff', commit + '^', commit]
+        logging.debug("Hash Command: %s", ' '.join(command))
         diff = subprocess.run(command, cwd=self.repository, capture_output=True, check=True).stdout
         # get only the changed lines (starting with + or -), no line numbers, hashes, ...
-        diff = b'\n'.join([l for l in diff.splitlines() if (l.startswith(b'+') or l.startswith(b'-'))])
+        diff = b'\n'.join([line for line in diff.splitlines()
+                           if (line.startswith(b'+') or line.startswith(b'-'))])
         return diff
-    
-    def getCommitDiffHash(self, hash):
-        diff = self.getCommitDiff(hash)
+
+    def get_commit_diff_hash(self, commit):
+        """
+        Get the hash value of the differences introduced by a commit
+        :param commit: commit's hash
+        """
+        diff = self.get_commit_diff(commit)
         sha = hashlib.sha1(diff)
         return sha.hexdigest()
 
-    def getDot(self, showMessages=False, revRange=None, logOptions=None):
+    def get_dot(self, show_messages=False, rev_range=None, log_options=None):
         """
-        :param showMessages (optional): Show commit messages in node
-        :param revRange (optional): git commit range to deal with
-        :param logOptions: - dictionary containing other options to use for log command
+        :param show_messages (optional): Show commit messages in node
+        :param rev_range (optional): git commit range to deal with
+        :param log_options: - dictionary containing other options to use for log command
                            - or None, in this case '-all' option is used
                            use an empty dictionary ([]) to suppress all options
         """
-        lines = self.getLog(revRange, logOptions)
-        
+        lines = self.get_log(rev_range, log_options)
+
         dates = {}
         messages = {}
-        predefinedNodeColor = {}
-        
+        predefined_node_color = {}
+
         digraph = "digraph G {"
-        #first extract messages
+        # first extract messages
         for line in lines:
             match = re.match(self.pattern, line)
             if match:
                 date = match.group(1)
                 message = match.group(3)
-                commitHash = match.group(5)
+                commit_hash = match.group(5)
                 if message in messages:
                     existing = messages[message]
-                    #print(dates[existing]+" - "+date)
                     if dates[existing] > date:
-                        #print("setting message ["+message+"] with ["+hash+"]")
-                        messages[message] = commitHash
+                        messages[message] = commit_hash
                 else:
-                    messages[message] = commitHash
-                dates[commitHash] = date
-        
+                    messages[message] = commit_hash
+                dates[commit_hash] = date
+
         for line in lines:
-            #print(line)
             match = re.match(self.pattern, line)
             if match:
                 date = match.group(1)
                 user = match.group(2)
                 message = match.group(3)
                 ref = match.group(4)
-                commitHash = match.group(5)
-                parentHash1 = match.group(6)
-                parentHash2 = match.group(7)
-        
+                commit_hash = match.group(5)
+                parent_hash1 = match.group(6)
+                parent_hash2 = match.group(7)
+
                 link = ""
                 link2 = ""
-                labelExt = ""
-                nodeMessage = ""
-                if showMessages:
-                    nodeMessage = "\n" + message.replace("\"", "'");
-                if commitHash in predefinedNodeColor:
-                    labelExt = "\\nSTASH INDEX"
-                    nodeColor = predefinedNodeColor[commitHash]
-        
+                label_ext = ""
+                node_message = ""
+                if show_messages:
+                    node_message = "\n" + message.replace("\"", "'")
+                if commit_hash in predefined_node_color:
+                    label_ext = "\\nSTASH INDEX"
+                    node_color = predefined_node_color[commit_hash]
+
                 else:
-                    nodeColor=self.COLOR_NODE
-                if parentHash1:
-                    link = " \"" + parentHash1 + "\"->\"" + commitHash + "\";"
+                    node_color = self.COLOR_NODE
+                if parent_hash1:
+                    link = " \"" + parent_hash1 + "\"->\"" + commit_hash + "\";"
                 else:
-                    #initial commit
-                    nodeColor = self.COLOR_NODE_FIRST
-                if parentHash2:
-                    link2 = " \"" + parentHash2 + "\"->\"" + commitHash + "\";"
-                if parentHash1 and parentHash2:
-                    nodeColor = self.COLOR_NODE_MERGE
+                    # initial commit
+                    node_color = self.COLOR_NODE_FIRST
+                if parent_hash2:
+                    link2 = " \"" + parent_hash2 + "\"->\"" + commit_hash + "\";"
+                if parent_hash1 and parent_hash2:
+                    node_color = self.COLOR_NODE_MERGE
                 if message in messages:
                     # message exists in history - possible cherry-pick -> compare diff hashes
-                    existingHash = messages[message]
-                    if commitHash is not existingHash and date > dates[existingHash]:
-                        diffHashOld = self.getCommitDiffHash(existingHash)
-                        diffHashActual = self.getCommitDiffHash(commitHash)
-                        logging.debug("M [" + message + "]")
-                        logging.debug("1 [" + diffHashOld + "]")
-                        logging.debug("2 [" + diffHashActual + "]")
-                        if diffHashOld == diffHashActual:
+                    existing_hash = messages[message]
+                    if commit_hash is not existing_hash and date > dates[existing_hash]:
+                        diff_hash_old = self.get_commit_diff_hash(existing_hash)
+                        diff_hash_actual = self.get_commit_diff_hash(commit_hash)
+                        logging.debug("M [%s]", message)
+                        logging.debug("1 [%s]", diff_hash_old)
+                        logging.debug("2 [%s]", diff_hash_actual)
+                        if diff_hash_old == diff_hash_actual:
                             logging.debug("equal")
-                            digraph += '    "' + str(existingHash) + '"->"' + commitHash + '"[label="Cherry\\nPick",style=dotted,fontcolor="red",color="red"]'
-                            nodeColor = self.COLOR_NODE_CHERRY_PICK
-                            #labelExt = "\\nCherry Pick"
+                            digraph += '    "' + str(existing_hash) + '"->"' + \
+                                       commit_hash + '"[label="Cherry\\nPick",style=dotted,' + \
+                                       'fontcolor="red",color="red"]'
+                            node_color = self.COLOR_NODE_CHERRY_PICK
+                            # label_ext = "\\nCherry Pick"
                         logging.debug("")
-                logging.debug("Message: [" + message + "]")
+                logging.debug("Message: [%s]", message)
                 if message.startswith("Revert"):
                     # check for revert
                     logging.debug("Revert commit")
-                    match = re.match(self.revertMessagePattern, message)
+                    match = re.match(self.reverse_message_pattern, message)
                     if match:
-                        originalMessage = match.group(1)
-                        logging.debug("Revert match [" + originalMessage + "]")
-                        if originalMessage in messages:
-                            origRevertHash = messages[originalMessage]
-                            digraph += '    "' + commitHash + '"->"' + str(origRevertHash) + '"[label="Revert",style=dotted,fontcolor="azure4",color="azure4",constraint=false]'
+                        original_message = match.group(1)
+                        logging.debug("Revert match [%s]", original_message)
+                        if original_message in messages:
+                            orig_revert_hash = messages[original_message]
+                            digraph += '    "' + commit_hash + '"->"' + str(orig_revert_hash) + \
+                                       '"[label="Revert",style=dotted,fontcolor="azure4",' + \
+                                       'color="azure4",constraint=false]'
                         else:
-                            logging.warning('Not able to find the original revert commit for commit ' + commitHash)
-                            digraph += '    "revert_' + commitHash + '"[label="", shape=none, height=.0, width=.0]; "' + commitHash + '"->"revert_' + commitHash + '"[label="Revert ??",style=dotted,fontcolor="azure4",color="azure4"];'
-                    nodeColor = self.COLOR_NODE_REVERT
-        
-                nodeInfo = ""
+                            logging.warning('Not able to find the original revert ' +
+                                            'commit for commit %s', commit_hash)
+                            digraph += '    "revert_' + commit_hash + \
+                                       '"[label="", shape=none, height=.0, width=.0]; "' + \
+                                       commit_hash + '"->"revert_' + commit_hash + \
+                                       '"[label="Revert ??",style=dotted,fontcolor="azure4",' + \
+                                       'color="azure4"];'
+                    node_color = self.COLOR_NODE_REVERT
+
+                node_info = ""
                 if ref:
-                    refEntries = ref.replace("(", "").replace(")", "").split(",")
-                    for refEntry in refEntries:
+                    ref_entries = ref.replace("(", "").replace(")", "").split(",")
+                    for ref_entry in ref_entries:
                         style = "shape=oval,fillcolor=" + self.COLOR_BRANCH
-                        if "HEAD" in refEntry:
+                        if "HEAD" in ref_entry:
                             style = "shape=diamond,fillcolor=" + self.COLOR_HEAD
-                        elif "tag" in refEntry:
-                            refEntry = refEntry.replace("tag: ", "")
+                        elif "tag" in ref_entry:
+                            ref_entry = ref_entry.replace("tag: ", "")
                             style = "shape=oval,fillcolor=" + self.COLOR_TAG
-                        elif "stash" in refEntry:
+                        elif "stash" in ref_entry:
                             style = "shape=box,fillcolor=" + self.COLOR_STASH
-                            nodeColor = self.COLOR_STASH
-                            labelExt = "\\nSTASH"
-                            if self.getCommitDiff(parentHash1) == "":
-                                logging.debug('>>> "' + parentHash1 + '"[color=red]')
-                                predefinedNodeColor[parentHash1] = self.COLOR_STASH
-                            elif self.getCommitDiff(parentHash2) == "":
-                                logging.debug('>>> "' + parentHash2 + '"[color=red]')
-                                predefinedNodeColor[parentHash2] = self.COLOR_STASH
+                            node_color = self.COLOR_STASH
+                            label_ext = "\\nSTASH"
+                            if self.get_commit_diff(parent_hash1) == "":
+                                logging.debug('>>> "%s"[color=red]', parent_hash1)
+                                predefined_node_color[parent_hash1] = self.COLOR_STASH
+                            elif self.get_commit_diff(parent_hash2) == "":
+                                logging.debug('>>> "%s"[color=red]', parent_hash2)
+                                predefined_node_color[parent_hash2] = self.COLOR_STASH
                             continue
-                        #else:
-                            #if "origin" in refEntry:
-                            #    continue
-                        nodeInfo += '    "' + refEntry + '"[style=filled,' + style + ']; "' + refEntry + '" -> "' + commitHash + '"\n'
-                digraph += "    \"" + commitHash + "\"[label=\"" + commitHash + nodeMessage + labelExt + "\\n(" + user + ")\",shape=box,style=filled,fillcolor=" + nodeColor + "];" + link + link2
-                if nodeInfo:
-                    digraph += nodeInfo
+                        node_info += '    "' + ref_entry + '"[style=filled,' + style + ']; "' + \
+                                     ref_entry + '" -> "' + commit_hash + '"\n'
+                digraph += "    \"" + commit_hash + "\"[label=\"" + commit_hash + node_message + \
+                           label_ext + "\\n(" + user + ")\",shape=box,style=filled,fillcolor=" + \
+                           node_color + "];" + link + link2
+                if node_info:
+                    digraph += node_info
         digraph += "}"
         return digraph
 
-    def getHtml(self, filename, revRange=None, logOptions=None):
+    def get_html(self, filename, rev_range=None, log_options=None):
         """
         Write an html page
-        :param revRange: git commit range to deal with
+        :param rev_range: git commit range to deal with
         :param filename: html file name
-        :param logOptions: - dictionary containing other options to use for log command
+        :param log_options: - dictionary containing other options to use for log command
                            - or None, in this case '-all' option is used
                            use an empty dictionary ([]) to suppress all options
         """
-
-        import xml.dom.minidom
-        import json
-        
-        svg = subprocess.run(['dot', '-Tsvg'], input=self.getDot(False, revRange, logOptions).encode('utf8'),
+        svg = subprocess.run(['dot', '-Tsvg'],
+                             input=self.get_dot(False, rev_range, log_options).encode('utf8'),
                              check=True, capture_output=True).stdout
         bodies = {}
-        for node in xml.dom.minidom.parseString(svg).getElementsByTagName("g")[0].getElementsByTagName("g"):
+        g_node = xml.dom.minidom.parseString(svg).getElementsByTagName("g")[0]
+        for node in g_node.getElementsByTagName("g"):
             commit = node.getElementsByTagName("title")[0].childNodes[0].data
             if node.getAttribute("id").startswith('node'):
-                #check=False because some nodes are not commits
-                bodies[commit] = subprocess.run(['git', 'log', '-n1', commit], cwd=self.repository, 
-                                                capture_output=True, check=False).stdout.decode('utf-8')
-                bodies[commit] = bodies[commit].replace("'", "&#39;").replace('\n', '<br/>').replace('"', '&quot;')
+                # check=False because some nodes are not commits
+                bodies[commit] = subprocess.run(['git', 'log', '-n1', commit], cwd=self.repository,
+                                                capture_output=True,
+                                                check=False).stdout.decode('utf-8')
+                bodies[commit] = bodies[commit].replace("'", "&#39;").replace('\n', '<br/>')
+                bodies[commit] = bodies[commit].replace('"', '&quot;')
                 if self.url is not None:
-                    bodies[commit] = re.sub(r'\b(' + commit + r'[a-z,0-9]*)\b', f"<a href='{self.url}/commit/{commit}'>\\1</a>", bodies[commit])
+                    bodies[commit] = re.sub(r'\b(' + commit + r'[a-z,0-9]*)\b',
+                                            f"<a href='{self.url}/commit/{commit}'>\\1</a>",
+                                            bodies[commit])
 
-        #Html header
+        # Html header
         html = '<!DOCTYPE html>\n'
         html += '<html>\n'
         html += '<head>\n'
@@ -277,7 +309,6 @@ class Gitgraphz():
 }
 """
         html += '</style>\n'
-
 
         html += '<script>\n'
         html += """
@@ -341,63 +372,77 @@ const logs = JSON.parse(`""" + json.dumps(bodies, indent=0) + """`);
 """
         html += '</script>\n'
 
-
         html += '</head>\n'
         html += "<body onload='addListeners()'>\n"
 
-        #Tooltip
-        html += '<span id="tooltip" class="tooltip"><p id="tooltipHeader" class="tooltipHeader">⨂</p><p id="tooltipContent" class="tooltipContent">This is a tooltip<br/></p></span>'
+        # Tooltip
+        html += '<span id="tooltip" class="tooltip">'
+        html += '<p id="tooltipHeader" class="tooltipHeader">⨂</p>'
+        html += '<p id="tooltipContent" class="tooltipContent">This is a tooltip<br/></p></span>'
 
-        #SVG inclusion (with suppression of xml and doctype informations)
+        # SVG inclusion (with suppression of xml and doctype informations)
         svg = svg[svg.index(b'<svg'):]
         html += '<div>\n' + svg.decode('utf-8') + '\n</div>\n'
 
-        #Html footer
+        # Html footer
         html += "</body>\n</html>"
 
-        with open(filename, 'w') as f:
-          f.write(html)
+        with open(filename, 'w', encoding='UTF-8') as f:
+            f.write(html)
 
-    def getImage(self, filename, showMessages=False, revRange=None, logOptions=None):
+    def get_image(self, filename, show_messages=False, rev_range=None, log_options=None):
         """
         Write an image
-        :param showMessages (optional): Show commit messages in node
-        :param revRange: git commit range to deal with
+        :param show_messages (optional): Show commit messages in node
+        :param rev_range: git commit range to deal with
         :param filename: name of the image file to produce
                          The extension is used to determine the image format,
                          it must be one of the accepted agrument accepted on the
                          command line of the dot utility
                          See: https://www.graphviz.org/docs/outputs/
-        :param logOptions: - dictionary containing other options to use for log command
+        :param log_options: - dictionary containing other options to use for log command
                            - or None, in this case '-all' option is used
                            use an empty dictionary ([]) to suppress all options
         """
         fmt = os.path.splitext(filename)[1][1:]
         if fmt == 'html':
-            self.getHtml(filename, revRange, logOptions)
+            self.get_html(filename, rev_range, log_options)
         else:
-            dotCommand = ['dot', '-T' + fmt, '-o', filename]
-            logging.info('Dot command: ' + ' '.join(dotCommand))
-            subprocess.run(dotCommand, input=self.getDot(showMessages, revRange, logOptions).encode('utf8'), check=True)
+            dot_command = ['dot', '-T' + fmt, '-o', filename]
+            logging.info('Dot command: %s', ' '.join(dot_command))
+            subprocess.run(dot_command,
+                           input=self.get_dot(show_messages, rev_range, log_options).encode('utf8'),
+                           check=True)
+
 
 def main():
-    import argparse
+    """
+    Function to deal with command line arguments
+    """
     parser = argparse.ArgumentParser()
-    
+
     parser.add_argument("-v", "--verbose", dest="verbose", action="count", default=0,
-                        help="Show info messages on stderr or debug messages if -v option is set twice")
-    parser.add_argument("-m", "--messages", dest="messages", action="store_true", help="Show commit messages in node" )
-    parser.add_argument("-r", "--range", dest="range", default=None, help="git commit range" )
-    parser.add_argument("-p", "--path", dest="path", default=None, help="git repository to use (local directory or url)")
-    parser.add_argument("-u", "--url", dest="url", default=None, help="repository url to use in html output")
+                        help="Show info messages on stderr or debug messages " +
+                             "if -v option is set twice")
+    parser.add_argument("-m", "--messages", dest="messages", action="store_true",
+                        help="Show commit messages in node")
+    parser.add_argument("-r", "--range", dest="range", default=None,
+                        help="git commit range")
+    parser.add_argument("-p", "--path", dest="path", default=None,
+                        help="git repository to use (local directory or url)")
+    parser.add_argument("-u", "--url", dest="url", default=None,
+                        help="repository url to use in html output")
     parser.add_argument("-o", "--output", dest='output', default=None,
-                        help="Image filename to produce, if not provided the DOT file will be outputed on STDOUT." + \
-                             "The extension is used to determine the image format, it must be one of the accepted agrument accepted on the " + \
-                             "command line of the dot utility (See: https://www.graphviz.org/docs/outputs/) + html")
-    parser.add_argument('--option', dest='logOptions', default=None, action='append',
-                        help="Options to add to the 'git log' command used to find all the relevant commits. If no option is provided " + \
+                        help="Image filename to produce, if not provided the DOT file will be " +
+                             "outputed on STDOUT." +
+                             "The extension is used to determine the image format, it must be " +
+                             "one of the accepted agrument accepted on the command line of the " +
+                             "dot utility (See: https://www.graphviz.org/docs/outputs/) + html")
+    parser.add_argument('--option', dest='log_options', default=None, action='append',
+                        help="Options to add to the 'git log' command used to find all the " +
+                             "relevant commits. If no option is provided " +
                              "the '--all' option is used. Ex: --option=--remotes=upstream")
-    
+
     args = parser.parse_args()
     if args.verbose > 0:
         level = 'INFO' if args.verbose == 1 else 'DEBUG'
@@ -405,15 +450,17 @@ def main():
 
     gg = Gitgraphz(args.path, args.url)
     if args.output is None or os.path.splitext(args.output)[1][1:] == 'dot':
-        dotContent = gg.getDot(showMessages=args.messages, revRange=args.range, logOptions=args.logOptions)
+        dot_content = gg.get_dot(show_messages=args.messages, rev_range=args.range,
+                                 log_options=args.log_options)
         if args.output is None:
-            print(dotContent)
+            print(dot_content)
         else:
-            with open(args.output, 'w') as f:
-                f.write(dotContent)
+            with open(args.output, 'w', encoding='UTF-8') as f:
+                f.write(dot_content)
     else:
-        gg.getImage(args.output, showMessages=args.messages, revRange=args.range, logOptions=args.logOptions)
+        gg.get_image(args.output, show_messages=args.messages, rev_range=args.range,
+                     log_options=args.log_options)
+
 
 if __name__ == '__main__':
     main()
-
