@@ -1,6 +1,8 @@
-# git-graph
+# git-graphz
 
 Tool to create a graph from a git history showing tags, branches, stash nodes, cherry-picks.
+
+Full documentation available [online](https://sebastienriettemto.github.io/git-graphz/)
 
 ## Requirements
 
@@ -11,27 +13,31 @@ Tool to create a graph from a git history showing tags, branches, stash nodes, c
 
 Run the following inside a git directory to write a graph description (DOT format) to stdout.
 
-    ./git-graph
+    git-graphz
 
 On linux you can use the following command to create a graph.ps file
 
-    ./git-graph | dot -Tps -o graph.ps
+    git-graphz | dot -Tps -o graph.ps
 
 Or you can simply (the file extension must be an accepted command line option of the dot utility (see [here](https://www.graphviz.org/docs/outputs/))
 
-    ./git-graph -o image.pdf
+    git-graphz -o image.pdf
 
 In addition to the graphviz accepted extensions, it is also possible to generate an html page
 
-    ./git-graph -o image.html
+    git-graphz -o image.html
 
 Example with range
 
-    ./git-graph -r a51eced..HEAD | dot -Tps -o graph.ps
+    git-graphz -r a51eced..HEAD | dot -Tps -o graph.ps
 
 Example with upstream commits
 
-    ./git-graph --option=--remotes=upstream
+    git-graphz --option=--remotes=upstream
+
+You can also provide an url for the git repository (instead of running the command in a git directory)
+
+    git-graphz -p https://github.com/SebastienRietteMTO/git-graphz.git
 
 ### Parameters
 * **-v**: to print info (or debug if provided twice) output to stderr
@@ -40,5 +46,5 @@ Example with upstream commits
 * **-p path**: to specify the directory containig the git repository (current working directory if omitted) or the url of a git repository
 * **--option=OPTION**: to add an option to the git log command used to list the relevant commits. If no option is provided the '--all' option is used. Ex: --option=--remotes=upstream
 
-# Example Graph
-![alt text](images/example.gif)
+# Example Graphs
+![simple example](docs/example.gif)
